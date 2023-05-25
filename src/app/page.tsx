@@ -1,63 +1,44 @@
 "use client";
-import detectEthereumProvider from "@metamask/detect-provider";
 import { useEffect, useState } from "react";
+import Web3 from "web3";
 
-import { Button } from "@/components/button";
-import { formatBalance, formatChainAsNum } from "@/lib/utils";
+import { Button, Input, useToast } from "@/components";
+import { formatBalance } from "@/lib/utils";
 
-const initialState = { accounts: [], balance: "", chainId: "" };
+const initialState = { accounts: [], balance: "" };
 
 export default function Home() {
-  const [hasProvider, setHasProvider] = useState<boolean | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [error, setError] = useState(false);
   const [wallet, setWallet] = useState(initialState);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [signature, setSignature] = useState("");
+  const [signatureDisp, setSignatureDisp] = useState("");
+  const [address, setAddress] = useState("");
+  const [message, setMessage] = useState("");
+  const [web3, setWeb3] = useState<Web3>();
+  const disableConnect = Boolean(wallet) && isConnecting;
+  const { toast } = useToast();
 
   useEffect(() => {
     getProvider();
-    return () => {
-      window.ethereum?.removeListener("accountsChanged", refreshAccounts);
-      window.ethereum?.removeListener("chainChanged", refreshChain);
-    };
   }, []);
 
   const getProvider = async () => {
-    const provider = await detectEthereumProvider({ silent: true });
-    setHasProvider(Boolean(provider));
-    if (provider) {
-      const accounts = await window.ethereum.request({
-        method: "eth_accounts",
-      });
-      refreshAccounts(accounts);
-      window.ethereum.on("accountsChanged", refreshAccounts);
-      window.ethereum.on("chainChanged", refreshChain);
+    if (window.ethereum) {
+      const web3 = new Web3(window.ethereum);
+      const accounts = await web3.eth.getAccounts();
+      setAddress(accounts[0]);
+      setWeb3(web3);
     }
-  };
-
-  const refreshAccounts = (accounts: any) => {
-    if (accounts.length > 0) {
-      updateWallet(accounts);
-    } else {
-      setWallet(initialState);
-    }
-  };
-
-  const refreshChain = (chainId: any) => {
-    setWallet((wallet) => ({ ...wallet, chainId }));
   };
 
   const updateWallet = async (accounts: any) => {
     const balance = formatBalance(
-      await window.ethereum!.request({
+      await window.ethereum.request({
         method: "eth_getBalance",
         params: [accounts[0], "latest"],
       })
     );
-    const chainId = await window.ethereum!.request({
-      method: "eth_chainId",
-    });
-    setWallet({ accounts, balance, chainId });
+    setWallet({ accounts, balance });
   };
 
   const handleConnect = async () => {
@@ -67,33 +48,86 @@ export default function Home() {
         method: "eth_requestAccounts",
       })
       .then((accounts: []) => {
-        setError(false);
         updateWallet(accounts);
       })
       .catch((err: any) => {
-        setError(true);
-        setErrorMessage(err.message);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: err.message,
+        });
       });
     setIsConnecting(false);
   };
 
+  const handleSign = async () => {
+    const messageHex = web3!.utils.utf8ToHex(message);
+    const messageHash = web3!.utils.sha3(messageHex);
+    const signature = await web3!.eth.personal.sign(
+      messageHash!,
+      address,
+      "test"
+    );
+    setSignatureDisp(signature);
+    setMessage("");
+  };
+
+  const verifySign = async () => {
+    const messageHex = web3!.utils.utf8ToHex(message);
+    const messageHash = web3!.utils.sha3(messageHex);
+    const signer = web3!.eth.accounts.recover(messageHash!, signature);
+    if (signer === address) {
+      toast({
+        title: "Success",
+        description: "Your signature is valid!",
+        duration: 5000,
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Failed",
+        description: "Unfortunately, your signature is invalid!",
+        duration: 5000,
+      });
+    }
+  };
+
   return (
-    <div className="container h-full flex flex-col place-items-center">
-      <h2>Injected Provider {hasProvider ? "DOES" : "DOES NOT"} Exist</h2>
-      {window.ethereum?.isMetaMask && wallet.accounts.length < 1 && (
-        <Button onClick={handleConnect}>Connect MetaMask</Button>
+    <div className="container h-full flex flex-col items-center justify-center">
+      {wallet.accounts.length < 1 && (
+        <Button disabled={disableConnect} onClick={handleConnect}>
+          Connect MetaMask
+        </Button>
       )}
       {wallet.accounts.length > 0 && (
-        <>
-          <div>Wallet Accounts: {wallet.accounts[0]}</div>
-          <div>Wallet Balance: {wallet.balance}</div>
-          <div>Hex ChainId: {wallet.chainId}</div>
-          <div>Numeric ChainId: {formatChainAsNum(wallet.chainId)}</div>
-        </>
-      )}
-      {error && (
-        <div onClick={() => setError(false)}>
-          <strong>Error:</strong> {errorMessage}
+        <div className="border-4 border-dashed flex flex-col justify-center items-center w-full md:w-1/2 p-10 rounded-2xl">
+          <p>Your Wallet Accounts: {wallet.accounts[0]}</p>
+          <div className="flex flex-col gap-3 w-full p-3">
+            <Input
+              placeholder="Enter a message"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+            />
+            <p className="break-words">
+              Signature: <small>{signatureDisp}</small>
+            </p>
+            {signatureDisp === "" ? (
+              <Button type="button" onClick={handleSign}>
+                Sign
+              </Button>
+            ) : (
+              <>
+                <Input
+                  placeholder="Enter a signature"
+                  value={signature}
+                  onChange={(e) => setSignature(e.target.value)}
+                />
+                <Button type="button" onClick={verifySign}>
+                  Verify
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

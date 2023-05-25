@@ -1,3 +1,4 @@
+import { Toaster } from "@/components";
 import "./globals.css";
 
 export const metadata = {
@@ -14,6 +15,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <main className="flex w-full grow flex-col">{children}</main>
+        <Toaster />
       </body>
     </html>
   );
