@@ -1,8 +1,11 @@
 "use client";
+import { Contract } from "web3-eth-contract";
 import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import Web3 from "web3";
 
 import { Button, Input, useToast } from "@/components";
+import { CONTRACT_ADDRESS, CONTRACT_ABI } from "@/lib/config";
 import { formatBalance } from "@/lib/utils";
 
 const initialState = { accounts: [], balance: "" };
@@ -10,24 +13,43 @@ const initialState = { accounts: [], balance: "" };
 export default function Home() {
   const [wallet, setWallet] = useState(initialState);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [signature, setSignature] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [signatureDisp, setSignatureDisp] = useState("");
-  const [address, setAddress] = useState("");
+  const [contractDisp, setContractDisp] = useState("");
+  const [contractVal, setContractVal] = useState("");
+  const [signature, setSignature] = useState("");
   const [message, setMessage] = useState("");
+  const [address, setAddress] = useState("");
   const [web3, setWeb3] = useState<Web3>();
+  const [contract, setContract] = useState<Contract>();
   const disableConnect = Boolean(wallet) && isConnecting;
   const { toast } = useToast();
 
   useEffect(() => {
     getProvider();
+    return () => {
+      window.ethereum?.removeListener("accountsChanged", refreshAccounts);
+    };
   }, []);
 
   const getProvider = async () => {
     if (window.ethereum) {
       const web3 = new Web3(window.ethereum);
       const accounts = await web3.eth.getAccounts();
-      setAddress(accounts[0]);
+      const contract = new web3!.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS);
       setWeb3(web3);
+      setContract(contract);
+      refreshAccounts(accounts);
+      window.ethereum.on("accountsChanged", refreshAccounts);
+    }
+  };
+
+  const refreshAccounts = (accounts: any) => {
+    if (accounts.length > 0) {
+      setAddress(accounts[0]);
+      updateWallet(accounts);
+    } else {
+      setWallet(initialState);
     }
   };
 
@@ -53,7 +75,7 @@ export default function Home() {
       .catch((err: any) => {
         toast({
           variant: "destructive",
-          title: "Error",
+          title: "Failed",
           description: err.message,
         });
       });
@@ -61,18 +83,27 @@ export default function Home() {
   };
 
   const handleSign = async () => {
+    setIsLoading(true);
     const messageHex = web3!.utils.utf8ToHex(message);
     const messageHash = web3!.utils.sha3(messageHex);
-    const signature = await web3!.eth.personal.sign(
-      messageHash!,
-      address,
-      "test"
-    );
-    setSignatureDisp(signature);
-    setMessage("");
+    web3!.eth.personal
+      .sign(messageHash!, address, "test")
+      .then((response) => {
+        setSignatureDisp(response);
+        setMessage("");
+      })
+      .catch((error) => {
+        toast({
+          variant: "destructive",
+          title: "Failed",
+          description: error.message,
+        });
+      })
+      .finally(() => setIsLoading(false));
   };
 
-  const verifySign = async () => {
+  const handleVerify = async () => {
+    setIsLoading(true);
     const messageHex = web3!.utils.utf8ToHex(message);
     const messageHash = web3!.utils.sha3(messageHex);
     const signer = web3!.eth.accounts.recover(messageHash!, signature);
@@ -80,16 +111,44 @@ export default function Home() {
       toast({
         title: "Success",
         description: "Your signature is valid!",
-        duration: 5000,
       });
     } else {
       toast({
         variant: "destructive",
         title: "Failed",
         description: "Unfortunately, your signature is invalid!",
-        duration: 5000,
       });
     }
+    setIsLoading(false);
+  };
+
+  const handleCallValue = async () => {
+    /* Can't use goerli test network because it must have a minimum balance of 0.001 ETH on mainnet, so instead I change it to sepolia test network. Because of that, this function still returning an error either using goerli or sepolia.
+    Temporary assumptions maybe because of incorrect ABI, requesting data from a block number that does not exist, or querying a node which is not fully synced. */
+    const message = await contract!.methods.retrieve().call();
+    console.log(message);
+  };
+
+  const handleStoreValue = async () => {
+    setIsLoading(true);
+    await contract!.methods
+      .store(contractVal)
+      .send({ from: address })
+      .then(() => {
+        toast({
+          title: "Success",
+          description: "Your transaction is success",
+        });
+        setContractVal("");
+      })
+      .catch((err: any) => {
+        toast({
+          variant: "destructive",
+          title: "Failed",
+          description: err.message,
+        });
+      })
+      .finally(() => setIsLoading(false));
   };
 
   return (
@@ -100,8 +159,9 @@ export default function Home() {
         </Button>
       )}
       {wallet.accounts.length > 0 && (
-        <div className="border-4 border-dashed flex flex-col justify-center items-center w-full md:w-1/2 p-10 rounded-2xl">
+        <div className="border-2 border-dashed flex flex-col justify-center items-center w-full md:w-3/4 lg:w-1/2 p-10 rounded-2xl">
           <p>Your Wallet Accounts: {wallet.accounts[0]}</p>
+          <p>Your Wallet Balance: {wallet.balance}</p>
           <div className="flex flex-col gap-3 w-full p-3">
             <Input
               placeholder="Enter a message"
@@ -112,7 +172,8 @@ export default function Home() {
               Signature: <small>{signatureDisp}</small>
             </p>
             {signatureDisp === "" ? (
-              <Button type="button" onClick={handleSign}>
+              <Button disabled={isLoading} type="button" onClick={handleSign}>
+                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Sign
               </Button>
             ) : (
@@ -122,11 +183,44 @@ export default function Home() {
                   value={signature}
                   onChange={(e) => setSignature(e.target.value)}
                 />
-                <Button type="button" onClick={verifySign}>
+                <Button
+                  disabled={isLoading}
+                  type="button"
+                  onClick={handleVerify}
+                >
+                  {isLoading && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
                   Verify
                 </Button>
               </>
             )}
+
+            <div className="border w-full my-7" />
+
+            <Input
+              placeholder="Enter a value"
+              value={contractVal}
+              onChange={(e) => setContractVal(e.target.value)}
+              type="number"
+            />
+            <Button
+              disabled={isLoading}
+              type="button"
+              onClick={handleStoreValue}
+            >
+              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Set the Value
+            </Button>
+            <Button
+              disabled={isLoading}
+              type="button"
+              onClick={handleCallValue}
+            >
+              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Get the Value
+            </Button>
+            <small>{contractDisp}</small>
           </div>
         </div>
       )}
