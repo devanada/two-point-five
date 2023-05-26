@@ -122,16 +122,9 @@ export default function Home() {
     setIsLoading(false);
   };
 
-  const handleCallValue = async () => {
-    /* Can't use goerli test network because it must have a minimum balance of 0.001 ETH on mainnet, so instead I change it to sepolia test network. Because of that, this function still returning an error either using goerli or sepolia.
-    Temporary assumptions maybe because of incorrect ABI, requesting data from a block number that does not exist, or querying a node which is not fully synced. */
-    const message = await contract!.methods.retrieve().call();
-    console.log(message);
-  };
-
   const handleStoreValue = async () => {
     setIsLoading(true);
-    await contract!.methods
+    contract!.methods
       .store(contractVal)
       .send({ from: address })
       .then(() => {
@@ -140,6 +133,28 @@ export default function Home() {
           description: "Your transaction is success",
         });
         setContractVal("");
+      })
+      .catch((err: any) => {
+        toast({
+          variant: "destructive",
+          title: "Failed",
+          description: err.message,
+        });
+      })
+      .finally(() => setIsLoading(false));
+  };
+
+  const handleCallValue = async () => {
+    setIsLoading(true);
+    contract!.methods
+      .retrieve()
+      .call()
+      .then((result: any) => {
+        toast({
+          title: "Success",
+          description: "Success getting the last value",
+        });
+        setContractDisp(result);
       })
       .catch((err: any) => {
         toast({
@@ -220,7 +235,7 @@ export default function Home() {
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Get the Value
             </Button>
-            <small>{contractDisp}</small>
+            <p>Your last value: {contractDisp}</p>
           </div>
         </div>
       )}
